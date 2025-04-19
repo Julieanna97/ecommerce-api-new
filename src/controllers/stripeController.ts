@@ -88,8 +88,8 @@ export const checkoutSessionHosted = async (req: Request, res: Response) => {
     const session = await stripe.checkout.sessions.create({
       line_items: lineItems,
       mode: "payment",
-      success_url: "http://localhost:5173/order-confirmation?session_id={CHECKOUT_SESSION_ID}",
-      cancel_url: "http://localhost:5173/checkout",
+      success_url: "https://client-mocha-omega.vercel.app/order-confirmation?session_id={CHECKOUT_SESSION_ID}",
+      cancel_url: "https://client-mocha-omega.vercel.app/checkout",
       client_reference_id: customerId.toString(),
     });
 
