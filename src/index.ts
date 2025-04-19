@@ -24,8 +24,6 @@ import orderRouter from "./routes/orders";
 import orderItemRouter from "./routes/orderItems";
 import stripeRouter from "./routes/stripe";
 import authRouter from "./routes/auth";
-import searchRouter from "./routes/search";
-app.use("/search", searchRouter);
 app.use('/products', productRouter)
 app.use('/customers', customerRouter)
 app.use('/orders', orderRouter)
