@@ -1,19 +1,23 @@
 import { Request, Response } from "express";
-import { db } from "../config/db";
+import { Database } from "../config/Database";
 import { STRIPE_SECRET_KEY } from "../constants/env";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import dotenv from 'dotenv';
 dotenv.config();
 
+const db = Database.getInstance().getPool();
+
 console.log("✅ STRIPE_SECRET_KEY from stripeController.ts:", process.env.STRIPE_SECRET_KEY);
 
 const stripe = require('stripe')(STRIPE_SECRET_KEY);
 
-export const checkoutSessionHosted = async (req: Request, res: Response) => {
+export const checkoutSessionHosted = async (req: Request, res: Response): Promise<void> => {
   const { cartItems, customerInfo } = req.body;
 
   if (!cartItems || !customerInfo) {
-    return res.status(400).json({ error: "Cart items and customer info are required." });
+    res.status(400).json({ error: "Cart items and customer info are required." });
+    return;
+  
   }
 
   try {

@@ -1,8 +1,10 @@
 import { Request, Response } from "express";
-import { db } from "../config/db";
+import { Database } from "../config/Database";
 import { logError } from "../utilities/logger";
-import { IOrderItem } from "../models/IOrderItem";
+import { IOrderItem } from "../models/interfaces/IOrderItem";
 import { ResultSetHeader } from "mysql2";
+
+const db = Database.getInstance().getPool();
 
 export const updateOrderItem = async (req: Request, res: Response) => {
   const id: string = req.params.id;

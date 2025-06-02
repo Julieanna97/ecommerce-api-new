@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import { NextFunction, Request, RequestExtended, Response } from 'express';
 dotenv.config();
 import jwt from 'jsonwebtoken';
-import { IUser } from '../models/IUser';
+import { IUser } from '../models/interfaces/IUser';
 import { ACCESS_TOKEN_SECRET } from '../constants/env';
 
 declare module 'express' {
