@@ -19,7 +19,7 @@ export const getProducts = async (_: any, res: Response) => {
 export const getProductById = async (req: Request, res: Response) => { 
   
   try {
-    const product = await productModel.findById<IProduct>(parseInt(req.params.id));
+    const product = await productModel.findById<IProduct>(parseInt(String(req.params.id)));
     product ? res.json(product) : res.status(404).json({ message: "Not found" });
   } catch (error) {
     res.status(500).json({error: logError(error)})
@@ -39,7 +39,7 @@ export const createProduct = async (req: Request, res: Response) => {
 export const updateProduct = async (req: Request, res: Response) => { 
 
   try {
-    await productModel.update(parseInt(req.params.id), req.body);
+    await productModel.update(parseInt(String(req.params.id)), req.body);
     res.json({ message: "Updated" });
     
   } catch(error) {
@@ -50,7 +50,7 @@ export const updateProduct = async (req: Request, res: Response) => {
 export const deleteProduct = async (req: Request, res: Response) => { 
   
   try {
-    await productModel.deleteById(parseInt(req.params.id));
+    await productModel.deleteById(parseInt(String(req.params.id)));
     res.json({ message: "Deleted" });
   } catch (error) {
     res.status(500).json({error: logError(error)})

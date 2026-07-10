@@ -7,7 +7,7 @@ import { ResultSetHeader } from "mysql2";
 const db = Database.getInstance().getPool();
 
 export const updateOrderItem = async (req: Request, res: Response) => {
-  const id: string = req.params.id;
+  const id = String(req.params.id);
   const { quantity }: IOrderItem = req.body;
 
   if (quantity <= 0) {
@@ -38,7 +38,7 @@ export const updateOrderItem = async (req: Request, res: Response) => {
 }
 
 export const deleteOrderItem = async (req: Request, res: Response) => {
-  const id: string = req.params.id;
+  const id = String(req.params.id);
   
   try {
     const [rows] = await db.query<IOrderItem[]>("SELECT * FROM order_items WHERE id = ?", [id]);

@@ -17,7 +17,7 @@ export const getCustomers = async (_: any, res: Response) => {
 }
 
 export const getCustomerById = async (req: Request, res: Response) => { 
-  const id: string = req.params.id;
+  const id = String(req.params.id);
   
   try {
     const sql = "SELECT * FROM customers WHERE id = ?";
@@ -63,7 +63,7 @@ export const createCustomer = async (req: Request, res: Response) => {
 }
 
 export const updateCustomer = async (req: Request, res: Response) => {
-  const id: string = req.params.id;
+  const id = String(req.params.id);
   const { firstname, lastname, email, password, phone, street_address, postal_code, city, country }: ICustomer = req.body;
   
   try {    
@@ -83,7 +83,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
   }
 }
 export const deleteCustomer = async (req: Request, res: Response) => {
-  const id: string = req.params.id;
+  const id = String(req.params.id);
   
   try {
     const sql = "DELETE FROM customers WHERE id = ?";
