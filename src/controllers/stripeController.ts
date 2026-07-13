@@ -7,8 +7,6 @@ dotenv.config();
 
 const db = Database.getInstance().getPool();
 
-console.log("✅ STRIPE_SECRET_KEY from stripeController.ts:", process.env.STRIPE_SECRET_KEY);
-
 const stripe = require('stripe')(STRIPE_SECRET_KEY);
 
 export const checkoutSessionHosted = async (req: Request, res: Response): Promise<void> => {

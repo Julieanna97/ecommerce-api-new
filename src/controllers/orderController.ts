@@ -43,7 +43,7 @@ export const getOrders = async (_: any, res: Response) => {
 }
 
 export const getOrderById = async (req: Request, res: Response) => {
-  const id: string = req.params.id;
+  const id = String(req.params.id);
   
   try {
     const sql = `
@@ -71,7 +71,7 @@ export const getOrderById = async (req: Request, res: Response) => {
 
 
 export const getOrderByPaymentId = async (req: Request, res: Response) => {
-  const id: string = req.params.id;
+  const id = String(req.params.id);
   
   try {
     const sql = `
@@ -170,7 +170,7 @@ const createOrderItem = async (data: IOrderItem) => {
 }
 
 export const updateOrder = async (req: Request, res: Response) => {
-  const id: string = req.params.id;
+  const id = String(req.params.id);
   const { payment_status, payment_id, order_status }: IOrder = req.body;
   
   try {
@@ -191,7 +191,7 @@ export const updateOrder = async (req: Request, res: Response) => {
 }
 
 export const deleteOrder = async (req: Request, res: Response) => {
-  const id: string = req.params.id;
+  const id = String(req.params.id);
   
   try {
     const sql = "DELETE FROM orders WHERE id = ?";

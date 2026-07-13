@@ -20,14 +20,10 @@ export class Product extends BaseModel {
     }
 
     async update(id: number, data: Partial<IProduct>) {
-        
-        delete data.created_at;
-        delete data.id;
-
-        const fields = Object.entries(data).map(([key, _]) => `${key} = ?`).join(', ');
+        const fields = Object.entries(data).map(([key, _]) => 
+            `${key} = ?`).join(', ');
         const values = Object.values(data);
         const sql = `UPDATE products SET ${fields} WHERE id = ?`;
         await this.db.query(sql, [...values, id]);
     }
-
 }
