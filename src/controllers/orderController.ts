@@ -1,9 +1,11 @@
 import { Request, Response } from "express";
-import { db } from "../config/db";
-import { IOrderItem } from "../models/IOrderItem";
-import { IOrder } from "../models/IOrder";
+import { Database } from "../config/Database";
+import { IOrderItem } from "../models/interfaces/IOrderItem";
+import { IOrder } from "../models/interfaces/IOrder";
 import { logError } from "../utilities/logger";
 import { ResultSetHeader } from "mysql2";
+
+const db = Database.getInstance().getPool();
 
 export const getOrders = async (_: any, res: Response) => {
   try {

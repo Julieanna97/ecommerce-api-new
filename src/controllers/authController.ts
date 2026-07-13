@@ -1,11 +1,13 @@
-import { db } from "../config/db";
+import { Database } from "../config/Database";
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { Request, RequestExtended, Response } from 'express';
-import { IUser } from "../models/IUser";
+import { IUser } from "../models/interfaces/IUser";
 import { logError } from "../utilities/logger";
 import { ResultSetHeader } from "mysql2";
 import { ACCESS_TOKEN_SECRET } from "../constants/env";
+
+const db = Database.getInstance().getPool();
 
 export const login = async (req: Request, res: Response): Promise<void> => {
   let user: IUser | null = null;

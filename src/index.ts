@@ -1,5 +1,4 @@
 import express from "express";
-import {connectDB} from "./config/db";
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import { VercelRequest, VercelResponse } from "@vercel/node";
@@ -32,7 +31,7 @@ app.use('/stripe', stripeRouter)
 app.use('/auth', authRouter)
 
 // Attempt to connect to the database
-connectDB()
+
 // Start Express server
 const PORT = 3000;
 app.listen(PORT, () => {

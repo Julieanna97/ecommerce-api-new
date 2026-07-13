@@ -1,8 +1,10 @@
 import { Request, Response } from "express";
-import { db } from "../config/db";
-import { ICustomer } from "../models/ICustomer";
+import { Database } from "../config/Database";
+import { ICustomer } from "../models/interfaces/ICustomer";
 import { logError } from "../utilities/logger";
 import { ResultSetHeader } from "mysql2";
+
+const db = Database.getInstance().getPool();
 
 export const getCustomers = async (_: any, res: Response) => { 
   try {
