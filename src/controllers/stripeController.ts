@@ -1,37 +1,50 @@
 import { Request, Response } from "express";
 import { Database } from "../config/Database";
-import { STRIPE_SECRET_KEY } from "../constants/env";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
-import dotenv from 'dotenv';
+import dotenv from "dotenv";
+
 dotenv.config();
 
 const db = Database.getInstance().getPool();
 
-const stripe = require('stripe')(STRIPE_SECRET_KEY);
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
-export const checkoutSessionHosted = async (req: Request, res: Response): Promise<void> => {
+const getClientUrl = () => {
+  const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+
+  return clientUrl.endsWith("/")
+    ? clientUrl.slice(0, -1)
+    : clientUrl;
+};
+
+export const checkoutSessionHosted = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   const { cartItems, customerInfo } = req.body;
 
   if (!cartItems || !customerInfo) {
-    res.status(400).json({ error: "Cart items and customer info are required." });
+    res.status(400).json({
+      error: "Cart items and customer info are required.",
+    });
     return;
-  
   }
 
   try {
-    // ✅ Check if customer exists
     const [existingCustomerRows] = await db.query<RowDataPacket[]>(
       "SELECT * FROM customers WHERE email = ?",
       [customerInfo.email]
     );
 
     let customerId: number;
+
     if (existingCustomerRows.length > 0) {
       customerId = existingCustomerRows[0].id as number;
     } else {
       const [createResult] = await db.query<ResultSetHeader>(
-        `INSERT INTO customers (firstname, lastname, email, phone, street_address, postal_code, city, country)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO customers 
+        (firstname, lastname, email, phone, street_address, postal_code, city, country)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           customerInfo.firstname,
           customerInfo.lastname,
@@ -43,76 +56,88 @@ export const checkoutSessionHosted = async (req: Request, res: Response): Promis
           customerInfo.country,
         ]
       );
+
       customerId = createResult.insertId;
     }
 
-    // ✅ Create order in database
-    const totalPrice = cartItems.reduce(
-      (total: number, item: any) => total + item.price * item.quantity,
-      0
-    );
+    const totalPrice = cartItems.reduce((total: number, item: any) => {
+      return total + Number(item.price) * Number(item.quantity);
+    }, 0);
 
     const [orderResult] = await db.query<ResultSetHeader>(
-      `INSERT INTO orders (customer_id, total_price, payment_status, payment_id, order_status)
-       VALUES (?, ?, 'Unpaid', '', 'Pending')`,
+      `INSERT INTO orders 
+      (customer_id, total_price, payment_status, payment_id, order_status)
+      VALUES (?, ?, 'Unpaid', '', 'Pending')`,
       [customerId, totalPrice]
     );
 
     const orderId = orderResult.insertId;
 
-    // ✅ Insert order items and reduce stock
     for (const item of cartItems) {
       await db.query(
-        `INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price)
-         VALUES (?, ?, ?, ?, ?)`,
-        [orderId, item.id, item.name, item.quantity, item.price]
+        `INSERT INTO order_items 
+        (order_id, product_id, product_name, quantity, unit_price)
+        VALUES (?, ?, ?, ?, ?)`,
+        [
+          orderId,
+          item.id,
+          item.name,
+          Number(item.quantity),
+          Number(item.price),
+        ]
       );
 
-      // ✅ Update stock
       await db.query(
         `UPDATE products SET stock = stock - ? WHERE id = ?`,
-        [item.quantity, item.id]
+        [Number(item.quantity), item.id]
       );
     }
 
-    // ✅ Prepare Stripe line items
     const lineItems = cartItems.map((item: any) => ({
       price_data: {
-        currency: "SEK",
+        currency: "sek",
         product_data: {
           name: item.name,
         },
-        unit_amount: item.price * 100,
+        unit_amount: Math.round(Number(item.price) * 100),
       },
-      quantity: item.quantity,
+      quantity: Number(item.quantity),
     }));
+
+    const clientUrl = getClientUrl();
 
     const session = await stripe.checkout.sessions.create({
       line_items: lineItems,
       mode: "payment",
-      success_url: "https://client-mocha-omega.vercel.app/order-confirmation?session_id={CHECKOUT_SESSION_ID}",
-      cancel_url: "https://client-mocha-omega.vercel.app/checkout",
+      success_url: `${clientUrl}/order-confirmation?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${clientUrl}/checkout`,
       client_reference_id: customerId.toString(),
+      metadata: {
+        orderId: orderId.toString(),
+      },
     });
 
-    // ✅ Update order with Stripe session ID
     await db.query(
-      `UPDATE orders SET payment_id = ?, order_status = 'Pending', payment_status = 'Unpaid' WHERE id = ?`,
+      `UPDATE orders 
+      SET payment_id = ?, order_status = 'Pending', payment_status = 'Unpaid' 
+      WHERE id = ?`,
       [session.id, orderId]
     );
 
     res.json({ checkout_url: session.url });
   } catch (error) {
     console.error("Stripe session error:", error);
-    res.status(500).json({ error: "An error occurred creating checkout session" });
+
+    res.status(500).json({
+      error: "An error occurred creating checkout session",
+    });
   }
 };
 
-// Optional if you want later
-export const checkoutSessionEmbedded = async (req: Request, res: Response) => {
+export const checkoutSessionEmbedded = async (_req: Request, res: Response) => {
   res.status(501).json({ message: "Not implemented yet" });
 };
 
-export const webhook = async (req: Request, res: Response) => {
+export const webhook = async (_req: Request, res: Response) => {
   res.status(501).json({ message: "Webhook handler not implemented yet" });
 };
