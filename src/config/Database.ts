@@ -1,3 +1,4 @@
+import fs from "fs";
 import mysql from "mysql2/promise";
 
 export class Database {
@@ -6,6 +7,15 @@ export class Database {
 
   private constructor() {
     const useSSL = process.env.DB_SSL === "true";
+
+    const caFromEnv = process.env.DB_CA_CERT?.replace(/\\n/g, "\n");
+    const caPath = process.env.DB_SSL_CA_PATH;
+
+    let caCertificate: string | undefined = caFromEnv;
+
+    if (!caCertificate && caPath && fs.existsSync(caPath)) {
+      caCertificate = fs.readFileSync(caPath, "utf8");
+    }
 
     this.pool = mysql.createPool({
       host: process.env.DB_HOST,
@@ -16,10 +26,11 @@ export class Database {
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0,
+
       ssl: useSSL
         ? {
             rejectUnauthorized: true,
-            ca: process.env.DB_CA_CERT?.replace(/\\n/g, "\n"),
+            ca: caCertificate,
           }
         : undefined,
     });
