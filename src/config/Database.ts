@@ -23,9 +23,19 @@ export class Database {
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
       port: Number(process.env.DB_PORT) || 3306,
-      waitForConnections: true,
-      connectionLimit: 10,
+
+      // Fail instead of waiting indefinitely.
+      connectTimeout: 8_000,
+      waitForConnections: false,
+
+      // A small pool is safer for a serverless function.
+      connectionLimit: 3,
+      maxIdle: 3,
+      idleTimeout: 30_000,
       queueLimit: 0,
+
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 0,
 
       ssl: useSSL
         ? {
@@ -44,7 +54,7 @@ export class Database {
     return Database.instance;
   }
 
-  public getPool() {
+  public getPool(): mysql.Pool {
     return this.pool;
   }
 }

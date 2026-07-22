@@ -1,9 +1,11 @@
-import { Request, Response } from "express";
-import {
+import type { Request, Response } from "express";
+import type {
   ResultSetHeader,
   RowDataPacket,
 } from "mysql2";
+import type { PoolConnection } from "mysql2/promise";
 import dotenv from "dotenv";
+
 import { Database } from "../config/Database";
 import {
   getShippingCountryName,
@@ -43,79 +45,112 @@ interface ValidatedCartItem {
   quantity: number;
 }
 
-class CheckoutValidationError extends Error {}
+class CheckoutValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CheckoutValidationError";
+  }
+}
 
-const getClientUrl = () => {
+const getClientUrl = (): string => {
   const clientUrl =
-    process.env.CLIENT_URL || "http://localhost:5173";
+    process.env.CLIENT_URL ||
+    "http://localhost:5173";
 
   return clientUrl.endsWith("/")
     ? clientUrl.slice(0, -1)
     : clientUrl;
 };
 
-const cleanText = (value: unknown) =>
+const cleanText = (value: unknown): string =>
   typeof value === "string" ? value.trim() : "";
 
 export const checkoutSessionHosted = async (
   req: Request,
   res: Response,
 ): Promise<void> => {
-  const cartItems = Array.isArray(req.body?.cartItems)
-    ? (req.body.cartItems as CartRequestItem[])
-    : [];
-
-  const customerInfo = req.body?.customerInfo;
-
-  if (cartItems.length === 0 || !customerInfo) {
-    res.status(400).json({
-      error: "Cart items and customer information are required.",
-    });
-
-    return;
-  }
-
-  const firstname = cleanText(customerInfo.firstname);
-  const lastname = cleanText(customerInfo.lastname);
-  const email = cleanText(customerInfo.email).toLowerCase();
-  const phone = cleanText(customerInfo.phone);
-  const streetAddress = cleanText(customerInfo.street_address);
-  const postalCode = cleanText(customerInfo.postal_code);
-  const city = cleanText(customerInfo.city);
-  const countryCode = cleanText(customerInfo.country);
-
-  if (
-    !firstname ||
-    !lastname ||
-    !email ||
-    !phone ||
-    !streetAddress ||
-    !postalCode ||
-    !city ||
-    !countryCode
-  ) {
-    res.status(400).json({
-      error: "All delivery fields are required.",
-    });
-
-    return;
-  }
-
-  if (!isShippingCountryCode(countryCode)) {
-    res.status(400).json({
-      error: "The selected delivery country is not supported.",
-    });
-
-    return;
-  }
-m
-  const countryName = getShippingCountryName(countryCode);
-  const connection = await db.getConnection();
+  let connection: PoolConnection | undefined;
+  let transactionStarted = false;
+  let stage = "validating request";
 
   try {
-    await connection.beginTransaction();
+    const cartItems = Array.isArray(
+      req.body?.cartItems,
+    )
+      ? (req.body.cartItems as CartRequestItem[])
+      : [];
 
-    const quantitiesByProductId = new Map<number, number>();
+    const customerInfo = req.body?.customerInfo;
+
+    if (cartItems.length === 0 || !customerInfo) {
+      res.status(400).json({
+        error:
+          "Cart items and customer information are required.",
+      });
+
+      return;
+    }
+
+    const firstname = cleanText(
+      customerInfo.firstname,
+    );
+
+    const lastname = cleanText(
+      customerInfo.lastname,
+    );
+
+    const email = cleanText(
+      customerInfo.email,
+    ).toLowerCase();
+
+    const phone = cleanText(customerInfo.phone);
+
+    const streetAddress = cleanText(
+      customerInfo.street_address,
+    );
+
+    const postalCode = cleanText(
+      customerInfo.postal_code,
+    );
+
+    const city = cleanText(customerInfo.city);
+
+    const countryCode =
+      normalizeShippingCountryCode(
+        customerInfo.country,
+      );
+
+    if (
+      !firstname ||
+      !lastname ||
+      !email ||
+      !phone ||
+      !streetAddress ||
+      !city ||
+      !countryCode
+    ) {
+      res.status(400).json({
+        error:
+          "Please complete all required delivery fields.",
+      });
+
+      return;
+    }
+
+    if (!isShippingCountryCode(countryCode)) {
+      res.status(400).json({
+        error:
+          "The selected delivery country is not valid.",
+      });
+
+      return;
+    }
+
+    const countryName =
+      getShippingCountryName(countryCode);
+
+    const quantitiesByProductId =
+      new Map<number, number>();
 
     for (const item of cartItems) {
       const productId = Number(item.id);
@@ -132,11 +167,28 @@ m
         );
       }
 
+      const currentQuantity =
+        quantitiesByProductId.get(productId) || 0;
+
       quantitiesByProductId.set(
         productId,
-        (quantitiesByProductId.get(productId) || 0) + quantity,
+        currentQuantity + quantity,
       );
     }
+
+    stage = "connecting to database";
+    console.log(`Checkout stage: ${stage}`);
+
+    connection = await db.getConnection();
+
+    stage = "starting database transaction";
+    console.log(`Checkout stage: ${stage}`);
+
+    await connection.beginTransaction();
+    transactionStarted = true;
+
+    stage = "loading products";
+    console.log(`Checkout stage: ${stage}`);
 
     const productIds = Array.from(
       quantitiesByProductId.keys(),
@@ -163,7 +215,7 @@ m
       );
     }
 
-    const productMap = new Map(
+    const productMap = new Map<number, ProductRow>(
       productRows.map((product) => [
         Number(product.id),
         product,
@@ -173,6 +225,7 @@ m
     const validatedItems: ValidatedCartItem[] =
       productIds.map((productId) => {
         const product = productMap.get(productId);
+
         const quantity =
           quantitiesByProductId.get(productId) || 0;
 
@@ -182,7 +235,11 @@ m
           );
         }
 
-        const stock = Number(product.stock) || 0;
+        const stock = Math.max(
+          0,
+          Number(product.stock) || 0,
+        );
+
         const price = Number(product.price);
 
         if (!Number.isFinite(price) || price < 0) {
@@ -214,7 +271,10 @@ m
     const shippingFee = getShippingFee(subtotal);
     const totalPrice = subtotal + shippingFee;
 
-    const [existingCustomerRows] =
+    stage = "loading customer";
+    console.log(`Checkout stage: ${stage}`);
+
+    const [existingCustomers] =
       await connection.query<CustomerRow[]>(
         `
           SELECT id
@@ -228,8 +288,14 @@ m
 
     let customerId: number;
 
-    if (existingCustomerRows.length > 0) {
-      customerId = Number(existingCustomerRows[0].id);
+    const existingCustomer =
+      existingCustomers[0];
+
+    if (existingCustomer) {
+      customerId = Number(existingCustomer.id);
+
+      stage = "updating customer";
+      console.log(`Checkout stage: ${stage}`);
 
       await connection.execute(
         `
@@ -256,7 +322,10 @@ m
         ],
       );
     } else {
-      const [createCustomerResult] =
+      stage = "creating customer";
+      console.log(`Checkout stage: ${stage}`);
+
+      const [customerResult] =
         await connection.execute<ResultSetHeader>(
           `
             INSERT INTO customers (
@@ -283,8 +352,11 @@ m
           ],
         );
 
-      customerId = createCustomerResult.insertId;
+      customerId = customerResult.insertId;
     }
+
+    stage = "creating order";
+    console.log(`Checkout stage: ${stage}`);
 
     const [orderResult] =
       await connection.execute<ResultSetHeader>(
@@ -302,6 +374,9 @@ m
       );
 
     const orderId = orderResult.insertId;
+
+    stage = "creating order items";
+    console.log(`Checkout stage: ${stage}`);
 
     for (const item of validatedItems) {
       await connection.execute(
@@ -346,16 +421,23 @@ m
       }
     }
 
-    const lineItems = validatedItems.map((item) => ({
-      price_data: {
-        currency: "sek",
-        product_data: {
-          name: item.name,
+    const lineItems = validatedItems.map(
+      (item) => ({
+        price_data: {
+          currency: "sek",
+
+          product_data: {
+            name: item.name,
+          },
+
+          unit_amount: Math.round(
+            item.price * 100,
+          ),
         },
-        unit_amount: Math.round(item.price * 100),
-      },
-      quantity: item.quantity,
-    }));
+
+        quantity: item.quantity,
+      }),
+    );
 
     const clientUrl = getClientUrl();
 
@@ -363,6 +445,9 @@ m
       shippingFee === 0
         ? "Free standard shipping"
         : "Standard shipping";
+
+    stage = "creating Stripe session";
+    console.log(`Checkout stage: ${stage}`);
 
     const session =
       await stripe.checkout.sessions.create({
@@ -377,7 +462,9 @@ m
               display_name: shippingDisplayName,
 
               fixed_amount: {
-                amount: Math.round(shippingFee * 100),
+                amount: Math.round(
+                  shippingFee * 100,
+                ),
                 currency: "sek",
               },
 
@@ -386,6 +473,7 @@ m
                   unit: "business_day",
                   value: 2,
                 },
+
                 maximum: {
                   unit: "business_day",
                   value: 5,
@@ -401,7 +489,8 @@ m
 
         cancel_url: `${clientUrl}/checkout`,
 
-        client_reference_id: orderId.toString(),
+        client_reference_id:
+          orderId.toString(),
 
         metadata: {
           orderId: orderId.toString(),
@@ -418,6 +507,15 @@ m
         },
       });
 
+    if (!session.url) {
+      throw new Error(
+        "Stripe did not return a checkout URL.",
+      );
+    }
+
+    stage = "saving Stripe session";
+    console.log(`Checkout stage: ${stage}`);
+
     await connection.execute(
       `
         UPDATE orders
@@ -430,7 +528,11 @@ m
       [session.id, orderId],
     );
 
+    stage = "committing transaction";
+    console.log(`Checkout stage: ${stage}`);
+
     await connection.commit();
+    transactionStarted = false;
 
     res.json({
       checkout_url: session.url,
@@ -439,30 +541,51 @@ m
       total: totalPrice,
     });
   } catch (error) {
-    await connection.rollback();
+    if (connection && transactionStarted) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error(
+          "Checkout rollback failed:",
+          rollbackError,
+        );
+      }
+    }
 
     if (error instanceof CheckoutValidationError) {
       res.status(400).json({
         error: error.message,
+        stage,
       });
 
       return;
     }
 
-    console.error("Stripe session error:", error);
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unknown checkout error";
+
+    console.error("Checkout session failed:", {
+      stage,
+      message,
+      error,
+    });
 
     res.status(500).json({
-      error: "An error occurred while creating the checkout session.",
+      error:
+        "An error occurred creating the checkout session.",
+      stage,
     });
   } finally {
-    connection.release();
+    connection?.release();
   }
 };
 
 export const checkoutSessionEmbedded = async (
   _req: Request,
   res: Response,
-) => {
+): Promise<void> => {
   res.status(501).json({
     message: "Not implemented yet",
   });
@@ -471,7 +594,7 @@ export const checkoutSessionEmbedded = async (
 export const webhook = async (
   _req: Request,
   res: Response,
-) => {
+): Promise<void> => {
   res.status(501).json({
     message: "Webhook handler not implemented yet",
   });
