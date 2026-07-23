@@ -1,206 +1,476 @@
 import { Request, Response } from "express";
+import { ResultSetHeader, RowDataPacket } from "mysql2";
 import { Database } from "../config/Database";
-import { IOrderItem } from "../models/interfaces/IOrderItem";
-import { IOrder } from "../models/interfaces/IOrder";
+import { getShippingFee } from "../constants/checkout";
 import { logError } from "../utilities/logger";
-import { ResultSetHeader } from "mysql2";
 
 const db = Database.getInstance().getPool();
 
-export const getOrders = async (_: any, res: Response) => {
+interface OrderDetailsRow extends RowDataPacket {
+  order_id: number;
+  customer_id: number;
+  total_price: number | string;
+  payment_status: string;
+  payment_id: string | null;
+  order_status: string;
+  orders_created_at: string;
+
+  firstname: string;
+  lastname: string;
+  email: string;
+  password: string | null;
+  phone: string;
+  street_address: string;
+  postal_code: string;
+  city: string;
+  country: string;
+  customers_created_at: string;
+
+  order_item_id: number | null;
+  product_id: number | null;
+  product_name: string | null;
+  quantity: number | string | null;
+  unit_price: number | string | null;
+}
+
+interface CreateOrderItemInput {
+  product_id: number;
+  product_name: string;
+  quantity: number | string;
+  unit_price: number | string;
+}
+
+interface CreateOrderBody {
+  customer_id: number;
+  payment_status: string;
+  payment_id: string | null;
+  order_status: string;
+  order_items: CreateOrderItemInput[];
+}
+
+interface UpdateOrderBody {
+  payment_status: string;
+  payment_id: string | null;
+  order_status: string;
+}
+
+interface OrderItemWithOrderId extends CreateOrderItemInput {
+  order_id: number;
+}
+
+export const getOrders = async (
+  _req: Request,
+  res: Response,
+) => {
   try {
     const sql = `
-      SELECT 
-        orders.id AS id, 
+      SELECT
+        orders.id AS id,
+        orders.customer_id,
+        orders.total_price,
+        orders.payment_status,
+        orders.payment_id,
+        orders.order_status,
+        orders.created_at,
+        customers.firstname AS customer_firstname,
+        customers.lastname AS customer_lastname,
+        customers.email AS customer_email,
+        customers.phone AS customer_phone,
+        customers.street_address AS customer_street_address,
+        customers.postal_code AS customer_postal_code,
+        customers.city AS customer_city,
+        customers.country AS customer_country,
+        customers.created_at AS customers_created_at
+      FROM orders
+      LEFT JOIN customers
+        ON orders.customer_id = customers.id
+    `;
+
+    const [rows] = await db.query<RowDataPacket[]>(sql);
+
+    res.json(rows);
+  } catch (error: unknown) {
+    res.status(500).json({
+      error: logError(error),
+    });
+  }
+};
+
+export const getOrderById = async (
+  req: Request,
+  res: Response,
+) => {
+  const id = String(req.params.id);
+
+  try {
+    const sql = `
+      SELECT
+        orders.id AS order_id,
+        orders.customer_id,
+        orders.total_price,
+        orders.payment_status,
+        orders.payment_id,
+        orders.order_status,
+        orders.created_at AS orders_created_at,
+
+        customers.firstname,
+        customers.lastname,
+        customers.email,
+        customers.password,
+        customers.phone,
+        customers.street_address,
+        customers.postal_code,
+        customers.city,
+        customers.country,
+        customers.created_at AS customers_created_at,
+
+        order_items.id AS order_item_id,
+        order_items.product_id,
+        order_items.product_name,
+        order_items.quantity,
+        order_items.unit_price
+      FROM orders
+      LEFT JOIN customers
+        ON orders.customer_id = customers.id
+      LEFT JOIN order_items
+        ON orders.id = order_items.order_id
+      WHERE orders.id = ?
+    `;
+
+    const [rows] = await db.query<OrderDetailsRow[]>(
+      sql,
+      [id],
+    );
+
+    if (rows.length === 0) {
+      res.status(404).json({
+        message: "Order not found",
+      });
+
+      return;
+    }
+
+    res.json(formatOrderDetails(rows));
+  } catch (error: unknown) {
+    res.status(500).json({
+      error: logError(error),
+    });
+  }
+};
+
+export const getOrderByPaymentId = async (
+  req: Request,
+  res: Response,
+) => {
+  const paymentId = String(req.params.id);
+
+  try {
+    const sql = `
+      SELECT
+        orders.id AS order_id,
+        orders.customer_id,
+        orders.total_price,
+        orders.payment_status,
+        orders.payment_id,
+        orders.order_status,
+        orders.created_at AS orders_created_at,
+
+        customers.firstname,
+        customers.lastname,
+        customers.email,
+        customers.password,
+        customers.phone,
+        customers.street_address,
+        customers.postal_code,
+        customers.city,
+        customers.country,
+        customers.created_at AS customers_created_at,
+
+        order_items.id AS order_item_id,
+        order_items.product_id,
+        order_items.product_name,
+        order_items.quantity,
+        order_items.unit_price
+      FROM orders
+      LEFT JOIN customers
+        ON orders.customer_id = customers.id
+      LEFT JOIN order_items
+        ON orders.id = order_items.order_id
+      WHERE orders.payment_id = ?
+    `;
+
+    const [rows] = await db.query<OrderDetailsRow[]>(
+      sql,
+      [paymentId],
+    );
+
+    if (rows.length === 0) {
+      res.status(404).json({
+        message: "Order not found",
+      });
+
+      return;
+    }
+
+    res.json(formatOrderDetails(rows));
+  } catch (error: unknown) {
+    res.status(500).json({
+      error: logError(error),
+    });
+  }
+};
+
+const formatOrderDetails = (
+  rows: OrderDetailsRow[],
+) => {
+  const firstRow = rows[0];
+
+  return {
+    id: firstRow.order_id,
+    customer_id: firstRow.customer_id,
+    total_price: firstRow.total_price,
+    payment_status: firstRow.payment_status,
+    payment_id: firstRow.payment_id,
+    order_status: firstRow.order_status,
+    created_at: firstRow.orders_created_at,
+
+    customer_firstname: firstRow.firstname,
+    customer_lastname: firstRow.lastname,
+    customer_email: firstRow.email,
+    customer_password: firstRow.password,
+    customer_phone: firstRow.phone,
+    customer_street_address: firstRow.street_address,
+    customer_postal_code: firstRow.postal_code,
+    customer_city: firstRow.city,
+    customer_country: firstRow.country,
+    customers_created_at: firstRow.customers_created_at,
+
+    order_items: rows
+      .filter((row) => row.order_item_id !== null)
+      .map((row) => ({
+        id: row.order_item_id,
+        product_id: row.product_id,
+        product_name: row.product_name,
+        quantity: row.quantity,
+        unit_price: row.unit_price,
+      })),
+  };
+};
+
+export const createOrder = async (
+  req: Request,
+  res: Response,
+) => {
+  const {
+    customer_id,
+    payment_status,
+    payment_id,
+    order_status,
+    order_items,
+  } = req.body as CreateOrderBody;
+
+  if (!Array.isArray(order_items) || order_items.length === 0) {
+    res.status(400).json({
+      message: "At least one order item is required.",
+    });
+
+    return;
+  }
+
+  const hasInvalidItem = order_items.some((item) => {
+    const quantity = Number(item.quantity);
+    const unitPrice = Number(item.unit_price);
+
+    return (
+      !Number.isFinite(quantity) ||
+      quantity <= 0 ||
+      !Number.isFinite(unitPrice) ||
+      unitPrice < 0
+    );
+  });
+
+  if (hasInvalidItem) {
+    res.status(400).json({
+      message: "Order contains an invalid quantity or unit price.",
+    });
+
+    return;
+  }
+
+  try {
+    const subtotal = order_items.reduce((sum, item) => {
+      const quantity = Number(item.quantity);
+      const unitPrice = Number(item.unit_price);
+
+      return sum + quantity * unitPrice;
+    }, 0);
+
+    const shippingFee = getShippingFee(subtotal);
+    const totalPrice = subtotal + shippingFee;
+
+    const sql = `
+      INSERT INTO orders (
         customer_id,
         total_price,
         payment_status,
         payment_id,
-        order_status,
-        orders.created_at,
-        customers.id AS customer_id, 
-        firstname AS customer_firstname, 
-        lastname AS customer_lastname, 
-        email AS customer_email, 
-        firstname AS customer_firstname, 
-        lastname AS customer_lastname,
-        email AS customer_email,
-        phone AS customer_phone,
-        street_address AS customer_street_address,
-        postal_code AS customer_postal_code,
-        city AS customer_city,
-        country AS customer_country,
-        customers.created_at AS customers_created_at,
-        orders.created_at AS created_at
-      
-      FROM orders
-      LEFT JOIN customers ON orders.customer_id = customers.id`;
-    const [rows] = await db.query<IOrder[]>(sql)
-    res.json(rows);
-  } catch (error) {
-    res.status(500).json({error: logError(error)})
-  }
-}
-
-export const getOrderById = async (req: Request, res: Response) => {
-  const id = String(req.params.id);
-  
-  try {
-    const sql = `
-      SELECT 
-        *, 
-        orders.id AS order_id,
-        orders.created_at AS orders_created_at, 
-        customers.created_at AS customers_created_at 
-      FROM orders 
-      LEFT JOIN customers ON orders.customer_id = customers.id
-      LEFT JOIN order_items ON orders.id = order_items.order_id
-      WHERE orders.id = ?
-    `;
-    const [rows] = await db.query<IOrder[]>(sql, [id])
-    // res.json(rows)
-    // return;
-
-    rows && rows.length > 0
-      ? res.json(formatOrderDetails(rows))
-      : res.status(404).json({message: 'Order not found'})
-  } catch (error) {
-    res.status(500).json({error: logError(error)})
-  }
-}
-
-
-export const getOrderByPaymentId = async (req: Request, res: Response) => {
-  const id = String(req.params.id);
-  
-  try {
-    const sql = `
-      SELECT 
-        *, 
-        orders.id AS order_id,
-        orders.created_at AS orders_created_at, 
-        customers.created_at AS customers_created_at 
-      FROM orders 
-      LEFT JOIN customers ON orders.customer_id = customers.id
-      LEFT JOIN order_items ON orders.id = order_items.order_id
-      WHERE orders.payment_id = ?
-    `;
-    const [rows] = await db.query<IOrder[]>(sql, [id])
-    // res.json(rows)
-    // return;
-
-    rows && rows.length > 0
-      ? res.json(formatOrderDetails(rows))
-      : res.status(404).json({message: 'Order not found'})
-  } catch (error) {
-    res.status(500).json({error: logError(error)})
-  }
-}
-
-const formatOrderDetails = (rows: IOrder[]) => ({
-  id: rows[0].order_id,
-  customer_id: rows[0].customer_id,
-  total_price: rows[0].total_price,
-  payment_status: rows[0].payment_status,
-  payment_id: rows[0].payment_id,
-  order_status: rows[0].order_status,
-  created_at: rows[0].orders_created_at,
-  customer_firstname: rows[0].firstname,
-  customer_lastname: rows[0].lastname,
-  customer_email: rows[0].email,
-  customer_password: rows[0].password,
-  customer_phone: rows[0].phone,
-  customer_street_address: rows[0].street_address,
-  customer_postal_code: rows[0].postal_code,
-  customer_city: rows[0].city,
-  customer_country: rows[0].country,
-  order_items: rows[0].id ? rows.map(item => ({
-    id: item.id,
-    product_id: item.product_id,
-    product_name: item.product_name,
-    quantity: item.quantity,
-    unit_price: item.unit_price
-  })) : []
-});
-
-export const createOrder = async (req: Request, res: Response) => {
-  const { customer_id, payment_status, payment_id, order_status }: IOrder = req.body;
-  
-  try {
-    const sql = `
-      INSERT INTO orders (customer_id, total_price, payment_status, payment_id, order_status)
+        order_status
+      )
       VALUES (?, ?, ?, ?, ?)
     `;
 
-    const totalPrice = req.body.order_items.reduce((total: number, item: IOrderItem) => total + (item.quantity * item.unit_price), 0);
-    const params = [customer_id, totalPrice, payment_status, payment_id, order_status]
-    const [result] = await db.query<ResultSetHeader>(sql, params)
-    if (result.insertId) {
-      const order_id: number = result.insertId;
-      const orderItems = req.body.order_items;
-      for (const orderItem of orderItems) {
-        const data = {...orderItem, order_id}
-        await createOrderItem(data)
-      };
+    const params = [
+      customer_id,
+      totalPrice,
+      payment_status,
+      payment_id,
+      order_status,
+    ];
+
+    const [result] = await db.query<ResultSetHeader>(
+      sql,
+      params,
+    );
+
+    const orderId = result.insertId;
+
+    for (const orderItem of order_items) {
+      await createOrderItem({
+        ...orderItem,
+        order_id: orderId,
+      });
     }
 
-    res.status(201).json({message: 'Order created', id: result.insertId});
-  } catch(error: unknown) {
-    res.status(500).json({error: logError(error)})
+    res.status(201).json({
+      message: "Order created",
+      id: orderId,
+      subtotal,
+      shipping_fee: shippingFee,
+      total_price: totalPrice,
+    });
+  } catch (error: unknown) {
+    res.status(500).json({
+      error: logError(error),
+    });
   }
-}
+};
 
-const createOrderItem = async (data: IOrderItem) => {
-  const {order_id, product_id, product_name, quantity, unit_price} = data;
-  try {
-    const sql = `
-      INSERT INTO order_items (
-        order_id, 
-        product_id, 
-        product_name, 
-        quantity, 
-        unit_price 
-      ) VALUES (?, ?, ?, ?, ?)
-    `;
-    const params = [order_id, product_id, product_name, quantity, unit_price]
-    await db.query<ResultSetHeader>(sql, params)
-  } catch(error) {
-    throw new Error;
-  }
-}
+const createOrderItem = async (
+  data: OrderItemWithOrderId,
+) => {
+  const {
+    order_id,
+    product_id,
+    product_name,
+    quantity,
+    unit_price,
+  } = data;
 
-export const updateOrder = async (req: Request, res: Response) => {
+  const sql = `
+    INSERT INTO order_items (
+      order_id,
+      product_id,
+      product_name,
+      quantity,
+      unit_price
+    )
+    VALUES (?, ?, ?, ?, ?)
+  `;
+
+  const params = [
+    order_id,
+    product_id,
+    product_name,
+    Number(quantity),
+    Number(unit_price),
+  ];
+
+  await db.query<ResultSetHeader>(sql, params);
+};
+
+export const updateOrder = async (
+  req: Request,
+  res: Response,
+) => {
   const id = String(req.params.id);
-  const { payment_status, payment_id, order_status }: IOrder = req.body;
-  
+
+  const {
+    payment_status,
+    payment_id,
+    order_status,
+  } = req.body as UpdateOrderBody;
+
   try {
     const sql = `
-      UPDATE orders 
-      SET payment_status = ?, payment_id = ?,order_status = ?
+      UPDATE orders
+      SET
+        payment_status = ?,
+        payment_id = ?,
+        order_status = ?
       WHERE id = ?
     `;
-    const params = [payment_status, payment_id, order_status, id];
-    const [result] = await db.query<ResultSetHeader>(sql, params)
 
-    result.affectedRows === 0
-      ? res.status(404).json({message: 'Order not found'})
-      : res.json({message: 'Order updated'});
-  } catch(error) {
-    res.status(500).json({error: logError(error)})
+    const params = [
+      payment_status,
+      payment_id,
+      order_status,
+      id,
+    ];
+
+    const [result] = await db.query<ResultSetHeader>(
+      sql,
+      params,
+    );
+
+    if (result.affectedRows === 0) {
+      res.status(404).json({
+        message: "Order not found",
+      });
+
+      return;
+    }
+
+    res.json({
+      message: "Order updated",
+    });
+  } catch (error: unknown) {
+    res.status(500).json({
+      error: logError(error),
+    });
   }
-}
+};
 
-export const deleteOrder = async (req: Request, res: Response) => {
+export const deleteOrder = async (
+  req: Request,
+  res: Response,
+) => {
   const id = String(req.params.id);
-  
+
   try {
-    const sql = "DELETE FROM orders WHERE id = ?";
-    const [result] = await db.query<ResultSetHeader>(sql, [id]);
-    
-    result.affectedRows === 0
-      ? res.status(404).json({message: 'Order not found'})
-      : res.json({message: 'Order deleted'});
-  } catch (error) {
-    res.status(500).json({error: logError(error)})
+    const sql = `
+      DELETE FROM orders
+      WHERE id = ?
+    `;
+
+    const [result] = await db.query<ResultSetHeader>(
+      sql,
+      [id],
+    );
+
+    if (result.affectedRows === 0) {
+      res.status(404).json({
+        message: "Order not found",
+      });
+
+      return;
+    }
+
+    res.json({
+      message: "Order deleted",
+    });
+  } catch (error: unknown) {
+    res.status(500).json({
+      error: logError(error),
+    });
   }
-}
+};
